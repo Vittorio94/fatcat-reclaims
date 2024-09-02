@@ -171,7 +171,7 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 
 	// Define the rectangle coordinates
 	RectangleTool.BeginDateTime = reclaim.StartDate;
-	RectangleTool.EndDateTime = sc.BaseDateTimeIn[sc.ArraySize + 4];
+	RectangleTool.EndDateTime = sc.BaseDateTimeIn[sc.ArraySize + sc.Input[2].GetInt()];
 	RectangleTool.BeginValue = reclaim.FixedSidePrice;
 	RectangleTool.EndValue = reclaim.ActiveSidePrice;
 
@@ -353,7 +353,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	// user inputs
 	SCInputRef MaxNumberOfReclaims = sc.Input[0];	   // length of the p_UpReclaims and p_DownReclaims arrays
 	SCInputRef NewReclaimThreshold = sc.Input[1];	   // Minimum size in ticks that an existing reclaim must be to start creating new ones (if there is enough bar overlap)
-	SCInputRef MinOverlappingBarsNumber = sc.Input[2]; // Minimum number of overlapping bars required to start a new reclaim
+	SCInputRef RectangleExtendBars = sc.Input[2];	   // How many bars the rectangles should extend to the right
 	SCInputRef UpReclaimsColor = sc.Input[3];		   // color of bullish reclaims
 	SCInputRef DownReclaimsColor = sc.Input[4];		   // color of bearish reclaims
 
@@ -380,8 +380,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		NewReclaimThreshold.SetInt(3); 
 
 		// Inputs default values
-		MinOverlappingBarsNumber.Name = "Overlap number";
-		MinOverlappingBarsNumber.SetInt(3); 
+		RectangleExtendBars.Name = "Extend right amount";
+		RectangleExtendBars.SetInt(10); // Default to 10 bars extension
+        RectangleExtendBars.SetIntLimits(0, 500); // Allow extension to a maximum of 500 bars
 
 		UpReclaimsColor.Name = "Up reclaims color";
 		UpReclaimsColor.SetColor(RGB(0, 100, 255)); 
