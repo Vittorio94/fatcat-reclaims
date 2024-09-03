@@ -241,8 +241,8 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size)
 
 	// get current price
 	float CurrentPrice = sc.LastTradePrice;
-	float CurrentHigh = sc.High[sc.Index];
-	float CurrentLow = sc.Low[sc.Index];
+	float CurrentHigh = max(sc.High[sc.Index], sc.High[sc.Index-1]);
+	float CurrentLow = min(sc.Low[sc.Index], sc.Low[sc.Index-1]);
 
 	// Loop all up reclaims and update them according to CurrentPrice
 	for (int i = 0; i < size; i++)
@@ -377,12 +377,12 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 
 		// Inputs default values
 		NewReclaimThreshold.Name = "Threshold tick size";
-		NewReclaimThreshold.SetInt(3); 
+		NewReclaimThreshold.SetInt(2); 
 
 		// Inputs default values
 		RectangleExtendBars.Name = "Extend right amount";
-		RectangleExtendBars.SetInt(10); // Default to 10 bars extension
-        RectangleExtendBars.SetIntLimits(0, 500); // Allow extension to a maximum of 500 bars
+		RectangleExtendBars.SetInt(10000); // Default to 10 bars extension
+        RectangleExtendBars.SetIntLimits(0, 10000); // Allow extension to a maximum of 500 bars
 
 		UpReclaimsColor.Name = "Up reclaims color";
 		UpReclaimsColor.SetColor(RGB(0, 100, 255)); 
@@ -471,12 +471,12 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	{
 		// store new value for PreviousPrice
 		PreviousPrice = CurrentPrice;
-		
-		// update existing reclaims
-		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
 
+		int currentUpReclaimHeight = (int)((CurrentPrice-p_UpReclaims[0].FixedSidePrice)/sc.TickSize);
+		int currentDownReclaimHeight = (int)((p_DownReclaims[0].FixedSidePrice-CurrentPrice)/sc.TickSize);
+		
 		// Check if we need to create a new bullish reclaim
-		if (p_UpReclaims[0].CurrentHeight+NewReclaimThreshold.GetInt() < p_UpReclaims[0].MaxHeight)
+		if (currentUpReclaimHeight+NewReclaimThreshold.GetInt() < p_UpReclaims[0].MaxHeight)
 		{
 
 			// delete rectangle that corresponds to the last array element
@@ -501,7 +501,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		}
 
 		// Check if we need to create a new bearish reclaim
-		if (p_DownReclaims[0].CurrentHeight+NewReclaimThreshold.GetInt() < p_DownReclaims[0].MaxHeight)
+		if (currentDownReclaimHeight+NewReclaimThreshold.GetInt() < p_DownReclaims[0].MaxHeight)
 		{
 			// delete rectangle that corresponds to the last array element
 			DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
@@ -523,6 +523,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			// draw the new rectangle and store the sierra LineNumber
 			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
 		}
+
+		// update existing reclaims
+		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
 	}
 
 	// Memory management: Deallocate when the study is unloaded
