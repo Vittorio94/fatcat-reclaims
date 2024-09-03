@@ -377,7 +377,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 
 		// Inputs default values
 		NewReclaimThreshold.Name = "Threshold tick size";
-		NewReclaimThreshold.SetInt(2); 
+		NewReclaimThreshold.SetInt(3); 
+		NewReclaimThreshold.SetIntLimits(1,1000);
 
 		// Inputs default values
 		RectangleExtendBars.Name = "Extend right amount";
@@ -396,12 +397,11 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	}
 
 	// Get the current price
-	float CurrentPrice = sc.LastTradePrice;
 
 	// Initialize stuff on the first run
 	if (sc.Index == 0)
 	{
-		PreviousPrice = CurrentPrice;
+		PreviousPrice = sc.LastTradePrice;
 
 		if (p_UpReclaims == NULL)
 		{
@@ -418,8 +418,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// initialize values for first reclaim
-			p_UpReclaims[0].FixedSidePrice = CurrentPrice;
-			p_UpReclaims[0].ActiveSidePrice = CurrentPrice;
+			p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
+			p_UpReclaims[0].ActiveSidePrice = sc.LastTradePrice;
 			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
 			p_UpReclaims[0].Deleted = false;
 
@@ -448,8 +448,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// initialize values for first reclaim
-			p_DownReclaims[0].FixedSidePrice = CurrentPrice;
-			p_DownReclaims[0].ActiveSidePrice = CurrentPrice;
+			p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
+			p_DownReclaims[0].ActiveSidePrice = sc.LastTradePrice;
 			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
 			p_DownReclaims[0].Deleted = false;
 
@@ -467,66 +467,63 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	}
 
 	// If the price has changed, update stuff
-	if (CurrentPrice != PreviousPrice)
+	// store new value for PreviousPrice
+	PreviousPrice = sc.LastTradePrice;
+
+	int currentUpReclaimHeight = (int)((sc.LastTradePrice-p_UpReclaims[0].FixedSidePrice)/sc.TickSize);
+	int currentDownReclaimHeight = (int)((p_DownReclaims[0].FixedSidePrice-sc.LastTradePrice)/sc.TickSize);
+	
+	// Check if we need to create a new bullish reclaim
+	if (currentUpReclaimHeight+NewReclaimThreshold.GetInt() < p_UpReclaims[0].MaxHeight)
 	{
-		// store new value for PreviousPrice
-		PreviousPrice = CurrentPrice;
 
-		int currentUpReclaimHeight = (int)((CurrentPrice-p_UpReclaims[0].FixedSidePrice)/sc.TickSize);
-		int currentDownReclaimHeight = (int)((p_DownReclaims[0].FixedSidePrice-CurrentPrice)/sc.TickSize);
-		
-		// Check if we need to create a new bullish reclaim
-		if (currentUpReclaimHeight+NewReclaimThreshold.GetInt() < p_UpReclaims[0].MaxHeight)
+		// delete rectangle that corresponds to the last array element
+		DeleteReclaim(sc, p_UpReclaims[MaxNumberOfReclaims.GetInt() - 1]);
+
+		// Shift elements of the array to the right
+		for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
 		{
-
-			// delete rectangle that corresponds to the last array element
-			DeleteReclaim(sc, p_UpReclaims[MaxNumberOfReclaims.GetInt() - 1]);
-
-			// Shift elements of the array to the right
-			for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
-			{
-				p_UpReclaims[i] = p_UpReclaims[i - 1];
-			}
-
-			// first member of the array is now the new reclaim, so update its values
-			p_UpReclaims[0].FixedSidePrice = p_UpReclaims[1].ActiveSidePrice;
-			p_UpReclaims[0].ActiveSidePrice = CurrentPrice;
-			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
-			p_UpReclaims[0].MaxHeight = 0;
-			p_UpReclaims[0].CurrentHeight = 0;
-			p_UpReclaims[0].Deleted = false;
-
-			// draw the new rectangle and store the sierra LineNumber
-			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
+			p_UpReclaims[i] = p_UpReclaims[i - 1];
 		}
 
-		// Check if we need to create a new bearish reclaim
-		if (currentDownReclaimHeight+NewReclaimThreshold.GetInt() < p_DownReclaims[0].MaxHeight)
-		{
-			// delete rectangle that corresponds to the last array element
-			DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
+		// first member of the array is now the new reclaim, so update its values
+		p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
+		p_UpReclaims[0].ActiveSidePrice = p_UpReclaims[0].FixedSidePrice;
+		p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_UpReclaims[0].MaxHeight = 0;
+		p_UpReclaims[0].CurrentHeight = 0;
+		p_UpReclaims[0].Deleted = false;
 
-			// Shift elements of the array to the right
-			for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
-			{
-				p_DownReclaims[i] = p_DownReclaims[i - 1];
-			}
-
-			// first member of the array is now the new reclaim, so update its values
-			p_DownReclaims[0].FixedSidePrice = p_DownReclaims[1].ActiveSidePrice;
-			p_DownReclaims[0].ActiveSidePrice = CurrentPrice;
-			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
-			p_DownReclaims[0].MaxHeight = 0;
-			p_DownReclaims[0].CurrentHeight = 0;
-			p_DownReclaims[0].Deleted = false;
-
-			// draw the new rectangle and store the sierra LineNumber
-			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
-		}
-
-		// update existing reclaims
-		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
+		// draw the new rectangle and store the sierra LineNumber
+		p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
 	}
+
+	// Check if we need to create a new bearish reclaim
+	if (currentDownReclaimHeight+NewReclaimThreshold.GetInt() < p_DownReclaims[0].MaxHeight)
+	{
+		// delete rectangle that corresponds to the last array element
+		DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
+
+		// Shift elements of the array to the right
+		for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
+		{
+			p_DownReclaims[i] = p_DownReclaims[i - 1];
+		}
+
+		// first member of the array is now the new reclaim, so update its values
+		p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
+		p_DownReclaims[0].ActiveSidePrice = p_DownReclaims[0].FixedSidePrice;
+		p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_DownReclaims[0].MaxHeight = 0;
+		p_DownReclaims[0].CurrentHeight = 0;
+		p_DownReclaims[0].Deleted = false;
+
+		// draw the new rectangle and store the sierra LineNumber
+		p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
+	}
+
+	// update existing reclaims
+	UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
 
 	// Memory management: Deallocate when the study is unloaded
 	if (sc.LastCallToFunction)
