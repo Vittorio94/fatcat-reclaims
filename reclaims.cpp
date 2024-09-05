@@ -162,9 +162,10 @@ bool CheckPriceOverlap(SCStudyInterfaceRef sc, int numberOfBars)
  * @param createNew A boolean flag indicating whether to create a new rectangle (`true`) or update an existing one (`false`).
  *                  - `true`: A new rectangle is drawn, and a new line number is assigned.
  *                  - `false`: The existing rectangle with the specified line number is updated.
+ * @param reclaimIndex The index of the reclaim in the reclaims array. The reclaims with reclaimIndex==0 are drawn differently
  * @return The line number of the newly created rectangle, or `-1` if an existing rectangle was updated.
  */
-int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false)
+int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false, int reclaimIndex=0)
 {
 	// Draw the initial rectangle
 	s_UseTool RectangleTool;
@@ -184,18 +185,37 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	// Set the rectangle color
 	if (reclaim.Type == 0)
 	{
-		// bullish reclaim
-		RectangleTool.Color = sc.Input[3].GetColor();
-		RectangleTool.SecondaryColor = sc.Input[3].GetColor();
+		if(reclaimIndex==0) {
+			// current reclaim
+			RectangleTool.Color = sc.Input[6].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[6].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
+		} else {
+			// old reclaim
+			RectangleTool.Color = sc.Input[3].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[3].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+		}
 	}
 	else
 	{
-		// bearish reclaim
-		RectangleTool.Color = sc.Input[4].GetColor();
-		RectangleTool.SecondaryColor = sc.Input[4].GetColor();
+		if(reclaimIndex==0) {
+			// current reclaim
+			RectangleTool.Color = sc.Input[7].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[7].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
+		} else {
+			// old reclaim
+			RectangleTool.Color = sc.Input[4].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[4].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+		}
 	}
 
-	RectangleTool.TransparencyLevel = 70;
+	if(reclaimIndex!=0 && int(abs(reclaim.ActiveSidePrice-reclaim.FixedSidePrice)/sc.TickSize)<=sc.Input[10].GetInt()) {
+		RectangleTool.TransparencyLevel = 100;
+	}
+
 
 	if (!createNew)
 	{
@@ -237,23 +257,30 @@ void DeleteReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim)
  *
  * @param sc A reference to the study interface, providing access to chart data and tools.
  * @param size The number of reclaim structures to update in the `upReclaims` and `downReclaims` arrays.
+ * @param checkPreviousBar When true, uses the high and low of the previous bar instead of the CurrentPrice to update reclaims
  */
-void UpdateReclaims(SCStudyInterfaceRef sc, int size)
+void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=false)
 {
 	// get sierra chart persistent variables for up and down reclaims
 	Reclaim *upReclaims = (Reclaim *)sc.GetPersistentPointer(1);
 	Reclaim *downReclaims = (Reclaim *)sc.GetPersistentPointer(2);
 
-	bool ShowCurrentReclaim = sc.Input[6].GetYesNo();
 
 	// get current price
 	float CurrentPrice = sc.LastTradePrice;
 	//float CurrentHigh = max(sc.High[sc.Index], sc.High[sc.Index-1]);
 	//float CurrentLow = min(sc.Low[sc.Index], sc.Low[sc.Index-1]);
-	float CurrentHigh = sc.High[sc.Index-1];
-	float CurrentLow = sc.Low[sc.Index-1];
-	float CurrentClose = sc.Close[sc.Index-1];
-	float CurrentOpen = sc.Open[sc.Index-1];
+	float CurrentHigh = CurrentPrice;
+	float CurrentLow = CurrentPrice;
+	//float CurrentClose = sc.Close[sc.Index-1];
+	float CurrentClose = sc.Close[sc.Index];
+
+	if(checkPreviousBar) {
+		CurrentHigh = sc.High[sc.Index-1];
+		CurrentLow = sc.Low[sc.Index-1];
+	}
+
+
 
 	// Loop all up reclaims and update them according to CurrentPrice
 	for (int i = 0; i < size; i++)
@@ -305,12 +332,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size)
 		}
 
 
-		if(i==0 && !ShowCurrentReclaim) {
-			// don't draw active reclaim
-			continue;
-		}
-
-		DrawReclaim(sc, upReclaims[i]);
+		DrawReclaim(sc, upReclaims[i], false, i);
 	}
 
 	// Loop all down reclaims and update them according to CurrentPrice
@@ -363,12 +385,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size)
 			}
 		}
 
-
-		if(i==0 && !ShowCurrentReclaim) {
-			// don't draw active reclaim
-			continue;
-		}
-		DrawReclaim(sc, downReclaims[i]);
+		DrawReclaim(sc, downReclaims[i], false, i);
 	}
 }
 
@@ -391,7 +408,12 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef UpReclaimsColor = sc.Input[3];		   // color of bullish reclaims
 	SCInputRef DownReclaimsColor = sc.Input[4];		   // color of bearish reclaims
 	SCInputRef UpdateOnBarClose = sc.Input[5];		   // When true, only update reclaims on bar close
-	SCInputRef ShowCurrentReclaim = sc.Input[6];		// Display the reclaim being build when set to true
+	SCInputRef UpCurrentReclaimColor = sc.Input[6];		// Color of the most recent bullish reclaim
+	SCInputRef DownCurrentReclaimColor = sc.Input[7];		// Color of the most recent bearish reclaim
+	SCInputRef OldReclaimsTransparency = sc.Input[8];		// Transparency of old reclaims from 0 (opaque) to 100 (transparent)
+	SCInputRef CurrentReclaimsTransparency = sc.Input[9];		// Transparency of current reclaims from 0 (opaque) to 100 (transparent)
+	SCInputRef MinReclaimSize = sc.Input[10];		// Display the reclaim being build when set to true
+
 
 	// Persistent variables to store the previous price (required to only update reclaims if price has changed)
 	float &PreviousPrice = sc.GetPersistentFloat(0);
@@ -424,17 +446,32 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		RectangleExtendBars.SetInt(10000); // Default to 10 bars extension
         RectangleExtendBars.SetIntLimits(0, 10000); // Allow extension to a maximum of 500 bars
 
-		UpReclaimsColor.Name = "Up reclaims color";
+		UpReclaimsColor.Name = "Existing bullish reclaims color";
 		UpReclaimsColor.SetColor(RGB(0, 100, 255)); 
 
-		DownReclaimsColor.Name = "Down reclaims color";
+		DownReclaimsColor.Name = "Existing bearish reclaims color";
 		DownReclaimsColor.SetColor(RGB(255, 100, 0)); 
 
 		UpdateOnBarClose.Name = "Only update on bar close";
-		UpdateOnBarClose.SetYesNo(1); 
+		UpdateOnBarClose.SetYesNo(0); 
 
-		ShowCurrentReclaim.Name = "Show reclaim being built";
-		ShowCurrentReclaim.SetYesNo(0); 
+		UpCurrentReclaimColor.Name="Current bullish reclaim color";		
+		UpCurrentReclaimColor.SetColor(RGB(0, 100, 255)); 
+
+		DownCurrentReclaimColor.Name="Current bearish reclaim color";		
+		DownCurrentReclaimColor.SetColor(RGB(255, 100, 0)); 
+
+		OldReclaimsTransparency.Name="Transparency of existing reclaims"; 
+		OldReclaimsTransparency.SetInt(70); 
+        OldReclaimsTransparency.SetIntLimits(0, 100); 
+
+		CurrentReclaimsTransparency.Name="Transparency of current reclaims"; 
+		CurrentReclaimsTransparency.SetInt(70); 
+        CurrentReclaimsTransparency.SetIntLimits(0, 100); 
+
+		MinReclaimSize.Name = "Hide reclaims smaller than (ticks)";
+		MinReclaimSize.SetInt(2); 
+        MinReclaimSize.SetIntLimits(0, 10000); 
 
 		return;
 	}
@@ -474,7 +511,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
+			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
 		}
 
 		if (p_DownReclaims == NULL)
@@ -505,17 +542,23 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
+			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
 		}
 
 		return;
 	}
 
+	if(!UpdateOnBarClose.GetYesNo()) {
+		// update existing reclaims using currentPrice
+		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt(), false);
+	}
 
-	// return if no new bar has formed and UpdateOnBarClose is set to true
-	if (UpdateOnBarClose.GetYesNo() && lastIndex == sc.Index) { 
+	// return if no new bar has formed 
+	if (lastIndex == sc.Index) { 
         return; 
     } 
+
+	// from this point on code is only executed once per bar
 
     lastIndex = sc.Index; 
 
@@ -546,7 +589,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_UpReclaims[0].Deleted = false;
 
 		// draw the new rectangle and store the sierra LineNumber
-		p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
+		p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
 	}
 
 	// Check if we need to create a new bearish reclaim
@@ -571,11 +614,11 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_DownReclaims[0].Deleted = false;
 
 		// draw the new rectangle and store the sierra LineNumber
-		p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
+		p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
 	}
 
 	// update existing reclaims
-	UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
+	UpdateReclaims(sc, MaxNumberOfReclaims.GetInt(), true);
 
 	// Memory management: Deallocate when the study is unloaded
 	if (sc.LastCallToFunction)
