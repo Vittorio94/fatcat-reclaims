@@ -75,6 +75,12 @@ struct Reclaim
 	int CurrentHeight;
 
 	/**
+	 * @brief The maximum retracement (How many ticks smaller the reclaim got from the MaxHeight)
+	 *
+	 */
+	int MaxRetracement;
+
+	/**
 	 * @brief The start date and time when the rectangle is created.
 	 *
 	 * Represents the left anchor of the rectangle
@@ -156,9 +162,10 @@ bool CheckPriceOverlap(SCStudyInterfaceRef sc, int numberOfBars)
  * @param createNew A boolean flag indicating whether to create a new rectangle (`true`) or update an existing one (`false`).
  *                  - `true`: A new rectangle is drawn, and a new line number is assigned.
  *                  - `false`: The existing rectangle with the specified line number is updated.
+ * @param reclaimIndex The index of the reclaim in the reclaims array. The reclaims with reclaimIndex==0 are drawn differently
  * @return The line number of the newly created rectangle, or `-1` if an existing rectangle was updated.
  */
-int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false)
+int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false, int reclaimIndex=0)
 {
 	// Draw the initial rectangle
 	s_UseTool RectangleTool;
@@ -178,19 +185,37 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	// Set the rectangle color
 	if (reclaim.Type == 0)
 	{
-		// bullish reclaim
-		RectangleTool.Color = sc.Input[3].GetColor();
-		RectangleTool.SecondaryColor = sc.Input[3].GetColor();
+		if(reclaimIndex==0) {
+			// current reclaim
+			RectangleTool.Color = sc.Input[6].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[6].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
+		} else {
+			// old reclaim
+			RectangleTool.Color = sc.Input[3].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[3].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+		}
 	}
 	else
 	{
-		// bearish reclaim
-		RectangleTool.Color = sc.Input[4].GetColor();
-		RectangleTool.SecondaryColor = sc.Input[4].GetColor();
+		if(reclaimIndex==0) {
+			// current reclaim
+			RectangleTool.Color = sc.Input[7].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[7].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
+		} else {
+			// old reclaim
+			RectangleTool.Color = sc.Input[4].GetColor();
+			RectangleTool.SecondaryColor = sc.Input[4].GetColor();
+			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+		}
 	}
 
-	// Adjust rectangle
-	RectangleTool.TransparencyLevel = 70;
+	if(reclaimIndex!=0 && int(abs(reclaim.ActiveSidePrice-reclaim.FixedSidePrice)/sc.TickSize)<=sc.Input[10].GetInt()) {
+		RectangleTool.TransparencyLevel = 100;
+	}
+
 
 	if (!createNew)
 	{
@@ -232,46 +257,71 @@ void DeleteReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim)
  *
  * @param sc A reference to the study interface, providing access to chart data and tools.
  * @param size The number of reclaim structures to update in the `upReclaims` and `downReclaims` arrays.
+ * @param checkPreviousBar When true, uses the high and low of the previous bar instead of the CurrentPrice to update reclaims
  */
-void UpdateReclaims(SCStudyInterfaceRef sc, int size)
+void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=false)
 {
 	// get sierra chart persistent variables for up and down reclaims
 	Reclaim *upReclaims = (Reclaim *)sc.GetPersistentPointer(1);
 	Reclaim *downReclaims = (Reclaim *)sc.GetPersistentPointer(2);
 
+
 	// get current price
 	float CurrentPrice = sc.LastTradePrice;
-	float CurrentHigh = max(sc.High[sc.Index], sc.High[sc.Index-1]);
-	float CurrentLow = min(sc.Low[sc.Index], sc.Low[sc.Index-1]);
+	//float CurrentHigh = max(sc.High[sc.Index], sc.High[sc.Index-1]);
+	//float CurrentLow = min(sc.Low[sc.Index], sc.Low[sc.Index-1]);
+	float CurrentHigh = CurrentPrice;
+	float CurrentLow = CurrentPrice;
+	//float CurrentClose = sc.Close[sc.Index-1];
+	float CurrentClose = sc.Close[sc.Index];
+
+	if(checkPreviousBar) {
+		CurrentHigh = sc.High[sc.Index-1];
+		CurrentLow = sc.Low[sc.Index-1];
+	}
+
+
 
 	// Loop all up reclaims and update them according to CurrentPrice
 	for (int i = 0; i < size; i++)
 	{
-		if (upReclaims[i].Deleted)
-		{
-			continue;
-		}
-
 		if (i == 0)
 		{
 			// update active side of first rectangle
-			upReclaims[i].ActiveSidePrice = CurrentPrice;
+			upReclaims[i].ActiveSidePrice = CurrentHigh;
 
-			if (CurrentPrice <= upReclaims[i].FixedSidePrice)
+			// update reclaim max height parameter if it got bigger
+			upReclaims[i].CurrentHeight = (int)((upReclaims[i].ActiveSidePrice-upReclaims[i].FixedSidePrice)/sc.TickSize);
+
+			int newMaxHeight = int((CurrentHigh-upReclaims[i].FixedSidePrice)/sc.TickSize);
+			if (newMaxHeight>upReclaims[i].MaxHeight) {
+				upReclaims[i].MaxHeight = newMaxHeight;
+			}
+
+			int newMaxRetracement = int((upReclaims[i].FixedSidePrice+upReclaims[i].MaxHeight*sc.TickSize-CurrentClose)/sc.TickSize);
+			if(newMaxRetracement>upReclaims[i].MaxRetracement) {
+				upReclaims[i].MaxRetracement = newMaxRetracement;
+			}
+
+			if (CurrentLow <= upReclaims[i].FixedSidePrice)
 			{
 				// update fixed side as well
-				upReclaims[i].FixedSidePrice = CurrentPrice;
+				upReclaims[i].FixedSidePrice = CurrentLow;
+				upReclaims[i].ActiveSidePrice = CurrentLow;
 				upReclaims[i].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+				upReclaims[i].CurrentHeight = 0;
+				upReclaims[i].MaxHeight = 0;
+				upReclaims[i].MaxRetracement = 0;
 			}
 		}
 		else
 		{
-			if (CurrentLow < upReclaims[i].ActiveSidePrice && CurrentLow >= upReclaims[i].FixedSidePrice)
+			if (CurrentLow < upReclaims[i].ActiveSidePrice)
 			{
-				upReclaims[i].ActiveSidePrice = CurrentLow;
+				upReclaims[i].ActiveSidePrice = max(CurrentLow, upReclaims[i].FixedSidePrice);
 			}
 
-			if (CurrentLow <= upReclaims[i].FixedSidePrice)
+			if (CurrentLow<=upReclaims[i].FixedSidePrice || upReclaims[i].ActiveSidePrice<=upReclaims[i].FixedSidePrice)
 			{
 				// delete drawing, the reclaim has been reclaimed
 				upReclaims[i].Deleted = true; // update struct in array
@@ -281,44 +331,51 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size)
 			}
 		}
 
-		// update reclaim max height parameter if it got bigger
-		upReclaims[i].CurrentHeight = (int)((upReclaims[i].ActiveSidePrice-upReclaims[i].FixedSidePrice)/sc.TickSize);
-		if (upReclaims[i].CurrentHeight>upReclaims[i].MaxHeight) {
-			upReclaims[i].MaxHeight = upReclaims[i].CurrentHeight;
-		}
 
-		DrawReclaim(sc, upReclaims[i]);
+		DrawReclaim(sc, upReclaims[i], false, i);
 	}
 
 	// Loop all down reclaims and update them according to CurrentPrice
 	for (int i = 0; i < size; i++)
 	{
-		if (downReclaims[i].Deleted)
-		{
-			continue;
-		}
 
 		if (i == 0)
 		{
 
 			// update active side of first rectangle
-			downReclaims[i].ActiveSidePrice = CurrentPrice;
+			downReclaims[i].ActiveSidePrice = CurrentLow;
 
-			if (CurrentPrice >= downReclaims[i].FixedSidePrice)
+			downReclaims[i].CurrentHeight= (int)((downReclaims[i].FixedSidePrice-downReclaims[i].ActiveSidePrice)/sc.TickSize);
+
+			// update reclaim max height parameter if it got bigger
+			int newMaxHeight = int((downReclaims[i].FixedSidePrice-CurrentLow)/sc.TickSize);
+			if (newMaxHeight>downReclaims[i].MaxHeight) {
+				downReclaims[i].MaxHeight = newMaxHeight;
+			}
+
+			int newMaxRetracement = int((CurrentClose-(downReclaims[i].FixedSidePrice-downReclaims[i].MaxHeight*sc.TickSize))/sc.TickSize);
+			if(newMaxRetracement>downReclaims[i].MaxRetracement) {
+				downReclaims[i].MaxRetracement = newMaxRetracement;
+			}
+
+			if (CurrentHigh >= downReclaims[i].FixedSidePrice)
 			{
 				// update fixed side as well
-				downReclaims[i].FixedSidePrice = CurrentPrice;
+				downReclaims[i].FixedSidePrice = CurrentHigh;
 				downReclaims[i].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+				downReclaims[i].CurrentHeight = 0;
+				downReclaims[i].MaxHeight = 0;
+				downReclaims[i].MaxRetracement = 0;
 			}
 		}
 		else
 		{
-			if (CurrentHigh > downReclaims[i].ActiveSidePrice && CurrentHigh <= downReclaims[i].FixedSidePrice)
+			if (CurrentHigh > downReclaims[i].ActiveSidePrice)
 			{
-				downReclaims[i].ActiveSidePrice = CurrentHigh;
+				downReclaims[i].ActiveSidePrice = min(CurrentHigh, downReclaims[i].FixedSidePrice);
 			}
 
-			if (CurrentHigh >= downReclaims[i].FixedSidePrice)
+			if (CurrentHigh>=downReclaims[i].FixedSidePrice || downReclaims[i].ActiveSidePrice>=downReclaims[i].FixedSidePrice)
 			{
 				// delete drawing, the reclaim has been reclaimed
 				downReclaims[i].Deleted = true; // update struct in array
@@ -328,13 +385,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size)
 			}
 		}
 
-		// update reclaim max height parameter if it got bigger
-		downReclaims[i].CurrentHeight= (int)((downReclaims[i].FixedSidePrice-downReclaims[i].ActiveSidePrice)/sc.TickSize);
-		if (downReclaims[i].CurrentHeight>downReclaims[i].MaxHeight) {
-			downReclaims[i].MaxHeight = downReclaims[i].CurrentHeight;
-		}
-
-		DrawReclaim(sc, downReclaims[i]);
+		DrawReclaim(sc, downReclaims[i], false, i);
 	}
 }
 
@@ -356,6 +407,13 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef RectangleExtendBars = sc.Input[2];	   // How many bars the rectangles should extend to the right
 	SCInputRef UpReclaimsColor = sc.Input[3];		   // color of bullish reclaims
 	SCInputRef DownReclaimsColor = sc.Input[4];		   // color of bearish reclaims
+	SCInputRef UpdateOnBarClose = sc.Input[5];		   // When true, only update reclaims on bar close
+	SCInputRef UpCurrentReclaimColor = sc.Input[6];		// Color of the most recent bullish reclaim
+	SCInputRef DownCurrentReclaimColor = sc.Input[7];		// Color of the most recent bearish reclaim
+	SCInputRef OldReclaimsTransparency = sc.Input[8];		// Transparency of old reclaims from 0 (opaque) to 100 (transparent)
+	SCInputRef CurrentReclaimsTransparency = sc.Input[9];		// Transparency of current reclaims from 0 (opaque) to 100 (transparent)
+	SCInputRef MinReclaimSize = sc.Input[10];		// Display the reclaim being build when set to true
+
 
 	// Persistent variables to store the previous price (required to only update reclaims if price has changed)
 	float &PreviousPrice = sc.GetPersistentFloat(0);
@@ -363,12 +421,15 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	// Persistent pointers to up and down Reclaims
 	Reclaim *p_UpReclaims = (Reclaim *)sc.GetPersistentPointer(1);
 	Reclaim *p_DownReclaims = (Reclaim *)sc.GetPersistentPointer(2);
+	int &lastIndex = sc.GetPersistentInt(3); 
 
 	// Set default study properties
 	if (sc.SetDefaults)
 	{
+
 		sc.GraphName = "FatCat reclaims";
 		sc.StudyDescription = "Draws reclaims on the chart";
+		sc.GraphRegion = 0;
 
 		// Inputs default values
 		MaxNumberOfReclaims.Name = "Max active reclaims";
@@ -378,30 +439,49 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		// Inputs default values
 		NewReclaimThreshold.Name = "Threshold tick size";
 		NewReclaimThreshold.SetInt(2); 
+		NewReclaimThreshold.SetIntLimits(1,1000);
 
 		// Inputs default values
 		RectangleExtendBars.Name = "Extend right amount";
 		RectangleExtendBars.SetInt(10000); // Default to 10 bars extension
         RectangleExtendBars.SetIntLimits(0, 10000); // Allow extension to a maximum of 500 bars
 
-		UpReclaimsColor.Name = "Up reclaims color";
+		UpReclaimsColor.Name = "Existing bullish reclaims color";
 		UpReclaimsColor.SetColor(RGB(0, 100, 255)); 
 
-		DownReclaimsColor.Name = "Down reclaims color";
+		DownReclaimsColor.Name = "Existing bearish reclaims color";
 		DownReclaimsColor.SetColor(RGB(255, 100, 0)); 
 
-		sc.AutoLoop = 1; 
+		UpdateOnBarClose.Name = "Only update on bar close";
+		UpdateOnBarClose.SetYesNo(0); 
+
+		UpCurrentReclaimColor.Name="Current bullish reclaim color";		
+		UpCurrentReclaimColor.SetColor(RGB(0, 100, 255)); 
+
+		DownCurrentReclaimColor.Name="Current bearish reclaim color";		
+		DownCurrentReclaimColor.SetColor(RGB(255, 100, 0)); 
+
+		OldReclaimsTransparency.Name="Transparency of existing reclaims"; 
+		OldReclaimsTransparency.SetInt(70); 
+        OldReclaimsTransparency.SetIntLimits(0, 100); 
+
+		CurrentReclaimsTransparency.Name="Transparency of current reclaims"; 
+		CurrentReclaimsTransparency.SetInt(70); 
+        CurrentReclaimsTransparency.SetIntLimits(0, 100); 
+
+		MinReclaimSize.Name = "Hide reclaims smaller than (ticks)";
+		MinReclaimSize.SetInt(2); 
+        MinReclaimSize.SetIntLimits(0, 10000); 
 
 		return;
 	}
 
 	// Get the current price
-	float CurrentPrice = sc.LastTradePrice;
 
 	// Initialize stuff on the first run
 	if (sc.Index == 0)
 	{
-		PreviousPrice = CurrentPrice;
+		PreviousPrice = sc.LastTradePrice;
 
 		if (p_UpReclaims == NULL)
 		{
@@ -415,11 +495,12 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_UpReclaims[i].Type = 0;
 				p_UpReclaims[i].CurrentHeight= 0;
 				p_UpReclaims[i].MaxHeight = 0;
+				p_UpReclaims[i].MaxRetracement = 0;
 			}
 
 			// initialize values for first reclaim
-			p_UpReclaims[0].FixedSidePrice = CurrentPrice;
-			p_UpReclaims[0].ActiveSidePrice = CurrentPrice;
+			p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
+			p_UpReclaims[0].ActiveSidePrice = sc.LastTradePrice;
 			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
 			p_UpReclaims[0].Deleted = false;
 
@@ -430,7 +511,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
+			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
 		}
 
 		if (p_DownReclaims == NULL)
@@ -445,11 +526,12 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_DownReclaims[i].Type = 1;
 				p_DownReclaims[i].CurrentHeight = 0;
 				p_DownReclaims[i].MaxHeight = 0;
+				p_DownReclaims[i].MaxRetracement = 0;
 			}
 
 			// initialize values for first reclaim
-			p_DownReclaims[0].FixedSidePrice = CurrentPrice;
-			p_DownReclaims[0].ActiveSidePrice = CurrentPrice;
+			p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
+			p_DownReclaims[0].ActiveSidePrice = sc.LastTradePrice;
 			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
 			p_DownReclaims[0].Deleted = false;
 
@@ -460,73 +542,83 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
+			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
 		}
 
 		return;
 	}
 
-	// If the price has changed, update stuff
-	if (CurrentPrice != PreviousPrice)
-	{
-		// store new value for PreviousPrice
-		PreviousPrice = CurrentPrice;
-
-		int currentUpReclaimHeight = (int)((CurrentPrice-p_UpReclaims[0].FixedSidePrice)/sc.TickSize);
-		int currentDownReclaimHeight = (int)((p_DownReclaims[0].FixedSidePrice-CurrentPrice)/sc.TickSize);
-		
-		// Check if we need to create a new bullish reclaim
-		if (currentUpReclaimHeight+NewReclaimThreshold.GetInt() < p_UpReclaims[0].MaxHeight)
-		{
-
-			// delete rectangle that corresponds to the last array element
-			DeleteReclaim(sc, p_UpReclaims[MaxNumberOfReclaims.GetInt() - 1]);
-
-			// Shift elements of the array to the right
-			for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
-			{
-				p_UpReclaims[i] = p_UpReclaims[i - 1];
-			}
-
-			// first member of the array is now the new reclaim, so update its values
-			p_UpReclaims[0].FixedSidePrice = p_UpReclaims[1].ActiveSidePrice;
-			p_UpReclaims[0].ActiveSidePrice = CurrentPrice;
-			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
-			p_UpReclaims[0].MaxHeight = 0;
-			p_UpReclaims[0].CurrentHeight = 0;
-			p_UpReclaims[0].Deleted = false;
-
-			// draw the new rectangle and store the sierra LineNumber
-			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true);
-		}
-
-		// Check if we need to create a new bearish reclaim
-		if (currentDownReclaimHeight+NewReclaimThreshold.GetInt() < p_DownReclaims[0].MaxHeight)
-		{
-			// delete rectangle that corresponds to the last array element
-			DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
-
-			// Shift elements of the array to the right
-			for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
-			{
-				p_DownReclaims[i] = p_DownReclaims[i - 1];
-			}
-
-			// first member of the array is now the new reclaim, so update its values
-			p_DownReclaims[0].FixedSidePrice = p_DownReclaims[1].ActiveSidePrice;
-			p_DownReclaims[0].ActiveSidePrice = CurrentPrice;
-			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
-			p_DownReclaims[0].MaxHeight = 0;
-			p_DownReclaims[0].CurrentHeight = 0;
-			p_DownReclaims[0].Deleted = false;
-
-			// draw the new rectangle and store the sierra LineNumber
-			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true);
-		}
-
-		// update existing reclaims
-		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt());
+	if(!UpdateOnBarClose.GetYesNo()) {
+		// update existing reclaims using currentPrice
+		UpdateReclaims(sc, MaxNumberOfReclaims.GetInt(), false);
 	}
+
+	// return if no new bar has formed 
+	if (lastIndex == sc.Index) { 
+        return; 
+    } 
+
+	// from this point on code is only executed once per bar
+
+    lastIndex = sc.Index; 
+
+	// If the price has changed, update stuff
+	// store new value for PreviousPrice
+	PreviousPrice = sc.LastTradePrice;
+
+	// Check if we need to create a new bullish reclaim
+	if (p_UpReclaims[0].MaxRetracement >= NewReclaimThreshold.GetInt())
+	{
+
+		// delete rectangle that corresponds to the last array element
+		DeleteReclaim(sc, p_UpReclaims[MaxNumberOfReclaims.GetInt() - 1]);
+
+		// Shift elements of the array to the right
+		for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
+		{
+			p_UpReclaims[i] = p_UpReclaims[i - 1];
+		}
+
+		// first member of the array is now the new reclaim, so update its values
+		p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
+		p_UpReclaims[0].ActiveSidePrice = p_UpReclaims[0].FixedSidePrice;
+		p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_UpReclaims[0].MaxHeight = 0;
+		p_UpReclaims[0].CurrentHeight = 0;
+		p_UpReclaims[0].MaxRetracement = 0;
+		p_UpReclaims[0].Deleted = false;
+
+		// draw the new rectangle and store the sierra LineNumber
+		p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
+	}
+
+	// Check if we need to create a new bearish reclaim
+	if (p_DownReclaims[0].MaxRetracement >= NewReclaimThreshold.GetInt())
+	{
+		// delete rectangle that corresponds to the last array element
+		DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
+
+		// Shift elements of the array to the right
+		for (int i = MaxNumberOfReclaims.GetInt() - 1; i > 0; --i)
+		{
+			p_DownReclaims[i] = p_DownReclaims[i - 1];
+		}
+
+		// first member of the array is now the new reclaim, so update its values
+		p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
+		p_DownReclaims[0].ActiveSidePrice = p_DownReclaims[0].FixedSidePrice;
+		p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_DownReclaims[0].MaxHeight = 0;
+		p_DownReclaims[0].CurrentHeight = 0;
+		p_DownReclaims[0].MaxRetracement = 0;
+		p_DownReclaims[0].Deleted = false;
+
+		// draw the new rectangle and store the sierra LineNumber
+		p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
+	}
+
+	// update existing reclaims
+	UpdateReclaims(sc, MaxNumberOfReclaims.GetInt(), true);
 
 	// Memory management: Deallocate when the study is unloaded
 	if (sc.LastCallToFunction)
