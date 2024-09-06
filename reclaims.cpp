@@ -112,6 +112,19 @@ struct Reclaim
 };
 
 /**
+ * Sign function for floats
+ */
+int Sign(float value)
+{
+    if (value > 0)
+        return 1;
+    else if (value < 0)
+        return -1;
+    else
+        return 0;
+}
+
+/**
  * @brief Checks for price overlap in the last specified number of bars.
  *
  * This function determines whether there is an overlap in the price range
@@ -149,6 +162,38 @@ bool CheckPriceOverlap(SCStudyInterfaceRef sc, int numberOfBars)
 	}
 
 	return isOverlap;
+}
+
+bool StartNewReclaimCheck(SCStudyInterfaceRef sc, const Reclaim &reclaim) {
+	if(reclaim.MaxRetracement < sc.Input[1].GetInt()){
+		return false;
+	}
+
+	if(sc.Input[12].GetYesNo()) {
+		if(sc.Close[sc.Index-1]==sc.Open[sc.Index-1]) {
+			return false;
+		}
+
+		// find first non-doji candle index
+		int nonDojiCandleIndex=0;
+		for(int i=0; i<3; i++) {
+			if(sc.Close[sc.Index-2-i]-sc.Open[sc.Index-2-i]!=0) {
+				nonDojiCandleIndex = sc.Index-2-i;
+				break;
+			}
+		}
+
+		if (nonDojiCandleIndex==0) {
+			// too many overlapping dojis, start new reclaim
+			return true;
+		}
+
+		if(Sign(sc.Close[sc.Index-1]-sc.Open[sc.Index-1]) == Sign(sc.Close[nonDojiCandleIndex]-sc.Open[nonDojiCandleIndex])){
+			return false;
+		}
+	}
+
+	return true;
 }
 
 /**
@@ -213,6 +258,8 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	}
 
 	if(reclaimIndex!=0 && int(abs(reclaim.ActiveSidePrice-reclaim.FixedSidePrice)/sc.TickSize)<=sc.Input[10].GetInt()) {
+		RectangleTool.Color = sc.Input[11].GetColor();
+		RectangleTool.SecondaryColor = sc.Input[11].GetColor();
 		RectangleTool.TransparencyLevel = 100;
 	}
 
@@ -412,7 +459,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef DownCurrentReclaimColor = sc.Input[7];		// Color of the most recent bearish reclaim
 	SCInputRef OldReclaimsTransparency = sc.Input[8];		// Transparency of old reclaims from 0 (opaque) to 100 (transparent)
 	SCInputRef CurrentReclaimsTransparency = sc.Input[9];		// Transparency of current reclaims from 0 (opaque) to 100 (transparent)
-	SCInputRef MinReclaimSize = sc.Input[10];		// Display the reclaim being build when set to true
+	SCInputRef MinReclaimSize = sc.Input[10];		// Reclaims smaller than this value will be hollow
+	SCInputRef HollowReclaimsColor = sc.Input[11];		// Color of the hollow reclaims
+	SCInputRef LookForOppositeBarColor = sc.Input[12];		// When true, only start a new reclaim if the candle that pulled back is the opposite color of the one before
 
 
 	// Persistent variables to store the previous price (required to only update reclaims if price has changed)
@@ -432,13 +481,13 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		sc.GraphRegion = 0;
 
 		// Inputs default values
-		MaxNumberOfReclaims.Name = "Max active reclaims";
-		MaxNumberOfReclaims.SetInt(100);			  
+		MaxNumberOfReclaims.Name = "Max active reclaims (DO NOT CHANGE IF STUDY IS ALREADY ON CHART)";
+		MaxNumberOfReclaims.SetInt(500);			  
 		MaxNumberOfReclaims.SetIntLimits(1, 1000); 
 
 		// Inputs default values
 		NewReclaimThreshold.Name = "Threshold tick size";
-		NewReclaimThreshold.SetInt(2); 
+		NewReclaimThreshold.SetInt(1); 
 		NewReclaimThreshold.SetIntLimits(1,1000);
 
 		// Inputs default values
@@ -450,7 +499,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		UpReclaimsColor.SetColor(RGB(0, 100, 255)); 
 
 		DownReclaimsColor.Name = "Existing bearish reclaims color";
-		DownReclaimsColor.SetColor(RGB(255, 100, 0)); 
+		DownReclaimsColor.SetColor(RGB(255, 0, 100)); 
 
 		UpdateOnBarClose.Name = "Only update on bar close";
 		UpdateOnBarClose.SetYesNo(0); 
@@ -459,19 +508,25 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		UpCurrentReclaimColor.SetColor(RGB(0, 100, 255)); 
 
 		DownCurrentReclaimColor.Name="Current bearish reclaim color";		
-		DownCurrentReclaimColor.SetColor(RGB(255, 100, 0)); 
+		DownCurrentReclaimColor.SetColor(RGB(255, 0, 100)); 
 
 		OldReclaimsTransparency.Name="Transparency of existing reclaims"; 
-		OldReclaimsTransparency.SetInt(70); 
+		OldReclaimsTransparency.SetInt(80); 
         OldReclaimsTransparency.SetIntLimits(0, 100); 
 
 		CurrentReclaimsTransparency.Name="Transparency of current reclaims"; 
-		CurrentReclaimsTransparency.SetInt(70); 
+		CurrentReclaimsTransparency.SetInt(50); 
         CurrentReclaimsTransparency.SetIntLimits(0, 100); 
 
-		MinReclaimSize.Name = "Hide reclaims smaller than (ticks)";
+		MinReclaimSize.Name = "Reclaims smaller than this are hollow";
 		MinReclaimSize.SetInt(2); 
         MinReclaimSize.SetIntLimits(0, 10000); 
+
+		HollowReclaimsColor.Name = "Hollow reclaims color";
+		HollowReclaimsColor.SetColor(RGB(25, 25, 25)); 
+
+		LookForOppositeBarColor.Name = "Look for opposite bar color when starting a new pullback";
+		LookForOppositeBarColor.SetYesNo(1); 
 
 		return;
 	}
@@ -567,7 +622,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	PreviousPrice = sc.LastTradePrice;
 
 	// Check if we need to create a new bullish reclaim
-	if (p_UpReclaims[0].MaxRetracement >= NewReclaimThreshold.GetInt())
+	if(StartNewReclaimCheck(sc, p_UpReclaims[0]))
 	{
 
 		// delete rectangle that corresponds to the last array element
@@ -593,7 +648,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	}
 
 	// Check if we need to create a new bearish reclaim
-	if (p_DownReclaims[0].MaxRetracement >= NewReclaimThreshold.GetInt())
+	if(StartNewReclaimCheck(sc, p_DownReclaims[0]))
 	{
 		// delete rectangle that corresponds to the last array element
 		DeleteReclaim(sc,p_DownReclaims[MaxNumberOfReclaims.GetInt() - 1]);
