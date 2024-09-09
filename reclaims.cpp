@@ -59,6 +59,23 @@ struct Reclaim
 	 */
 	float ActiveSidePrice;
 
+
+	/**
+	 * @brief The expected value of the reclaim
+	 *
+	 * Every time price touches the active side of the rectangle after a pullback, ev increases by 1
+	 */
+	int EV;
+
+	/**
+	 * @brief Wether to increse EV the next time active side is touched
+	 *
+	 * When price pulls away enough ticks from the active side price, this is set to true.
+	 * The next time price touches the active side of the reclaim, if IncreaseExpectedValueOnNextTouch
+	 * is true then ExpectedValue is increased by 1
+	 */
+	bool IncreaseEVOnNextTouch;
+
 	/**
 	 * @brief The maximum height in ticks that the reclaims got to be during its existance
 	 *
@@ -92,7 +109,14 @@ struct Reclaim
 	 *
 	 * This is the sierra chart LineNumber of the rectangle drawing that corresplonds to the reclaim
 	 */
-	int LineNumber;
+	int RectLineNumber;
+
+	/**
+	 * @brief The line number associated with the EV text.
+	 *
+	 * This is the sierra chart LineNumber of the EV text drawing that corresplonds to the reclaim
+	 */
+	int EVTextLineNumber;
 
 	/**
 	 * @brief Flag indicating if the rectangle has been deleted.
@@ -109,6 +133,13 @@ struct Reclaim
 	 * - `1`: Bearish reclaim
 	 */
 	int Type;
+
+	/**
+	 * @brief The time when the reclaim became smaller than the minimum reclaim size
+	 *
+	 * This is used to modulate the colors of the reclaims that become hollow because they are too small
+	 */
+	SCDateTime DecayStartTime;
 };
 
 /**
@@ -232,41 +263,52 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	{
 		if(reclaimIndex==0) {
 			// current reclaim
-			RectangleTool.Color = sc.Input[6].GetColor();
+			//RectangleTool.Color = sc.Input[6].GetColor();
+			RectangleTool.Color = RGB(255,255,255);
 			RectangleTool.SecondaryColor = sc.Input[6].GetColor();
 			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
 		} else {
 			// old reclaim
 			RectangleTool.Color = sc.Input[3].GetColor();
 			RectangleTool.SecondaryColor = sc.Input[3].GetColor();
-			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+			
+			//RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.EV/10);
 		}
 	}
 	else
 	{
 		if(reclaimIndex==0) {
 			// current reclaim
-			RectangleTool.Color = sc.Input[7].GetColor();
+			//RectangleTool.Color = sc.Input[7].GetColor();
+			RectangleTool.Color = RGB(255,255,255);
 			RectangleTool.SecondaryColor = sc.Input[7].GetColor();
 			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
 		} else {
 			// old reclaim
 			RectangleTool.Color = sc.Input[4].GetColor();
 			RectangleTool.SecondaryColor = sc.Input[4].GetColor();
-			RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+			//RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
+			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.EV/10);
 		}
 	}
 
-	if(reclaimIndex!=0 && int(abs(reclaim.ActiveSidePrice-reclaim.FixedSidePrice)/sc.TickSize)<=sc.Input[10].GetInt()) {
+	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt()) {
+		SCDateTime timeDelta = sc.CurrentSystemDateTime-reclaim.DecayStartTime;
 		RectangleTool.Color = sc.Input[11].GetColor();
-		RectangleTool.SecondaryColor = sc.Input[11].GetColor();
-		RectangleTool.TransparencyLevel = 100;
+		double seconds = timeDelta.GetTimeInSeconds();
+		if(seconds<5) {
+			RectangleTool.TransparencyLevel = sc.Input[8].GetInt()+(100-sc.Input[8].GetInt())*seconds/5;
+		} else {
+			RectangleTool.SecondaryColor = sc.Input[11].GetColor();
+			RectangleTool.TransparencyLevel = 100;
+		}
 	}
 
 
 	if (!createNew)
 	{
-		RectangleTool.LineNumber = reclaim.LineNumber;
+		RectangleTool.LineNumber = reclaim.RectLineNumber;
 		sc.UseTool(RectangleTool);
 		// always return -1 when updating existing rectangle
 		return -1;
@@ -281,6 +323,90 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 }
 
 /**
+ * @brief Draws or updates the EV texto of a reclaim.
+ *
+ * This function either draws a new text string or updates an existing one on the chart
+ * based on the provided reclaim data.
+ *
+ * @param sc A reference to the study interface, providing access to chart data and tools.
+ * @param reclaim A reference to the `Reclaim` structure containing the data needed to draw the EV text.
+ * @param createNew A boolean flag indicating whether to create a new text (`true`) or update an existing one (`false`).
+ *                  - `true`: A new text is drawn, and a new line number is assigned.
+ *                  - `false`: The existing text with the specified line number is updated.
+ * @param reclaimIndex The index of the reclaim in the reclaims array. The reclaims with reclaimIndex==0 are drawn differently
+ * @return The line number of the newly created text, or `-1` if an existing text was updated.
+ */
+int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false, int reclaimIndex=0){
+	if(reclaimIndex==0) {
+		return -1;
+	}
+
+	// Draw the initial rectangle
+	s_UseTool TextTool;
+	TextTool.Clear(); // Initialize the Tool structure
+
+	TextTool.ChartNumber = sc.ChartNumber;
+	TextTool.DrawingType = DRAWING_TEXT;
+	TextTool.AddAsUserDrawnDrawing = 0;
+	TextTool.Region = 0;
+
+	// Define the rectangle coordinates
+	TextTool.BeginIndex = sc.ArraySize+3;
+
+	SCString textString;
+	//textString.Format("EV: %d, increase flag: %d", reclaim.EV, reclaim.IncreaseEVOnNextTouch);
+	textString.Format("EV %d", reclaim.EV);
+	TextTool.Text = textString;
+	TextTool.FontSize = 10;
+
+	// Set the rectangle color
+	if (reclaim.Type == 0)
+	{
+		TextTool.BeginValue = reclaim.ActiveSidePrice;
+		if(reclaimIndex==0) {
+			// current reclaim
+			TextTool.Color = sc.Input[6].GetColor();
+		} else {
+			// old reclaim
+			TextTool.Color = sc.Input[3].GetColor();
+		}
+	}
+	else
+	{
+		TextTool.BeginValue = reclaim.ActiveSidePrice+sc.TickSize;
+
+		if(reclaimIndex==0) {
+			// current reclaim
+			TextTool.Color = sc.Input[7].GetColor();
+		} else {
+			// old reclaim
+			TextTool.Color = sc.Input[4].GetColor();
+		}
+	}
+
+	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt()) {
+		TextTool.Color = sc.Input[11].GetColor();
+	}
+
+
+	if (!createNew)
+	{
+		TextTool.LineNumber = reclaim.EVTextLineNumber;
+		sc.UseTool(TextTool);
+		// always return -1 when updating existing rectangle
+		return -1;
+	}
+	else
+	{
+		// Creating new rectangle. Allow sierra to choose a new LineNumber.
+		sc.UseTool(TextTool);
+		// return the LineNumber of the new rectangle
+		return TextTool.LineNumber;
+	}
+
+}
+
+/**
  * @brief Deletes a reclaim rectangle from the chart.
  *
  * This function removes a previously drawn rectangle from the chart, identified by the
@@ -291,7 +417,8 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
  */
 void DeleteReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim)
 {
-	sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, reclaim.LineNumber);
+	sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, reclaim.RectLineNumber);
+	sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, reclaim.EVTextLineNumber);
 }
 
 /**
@@ -311,6 +438,9 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 	// get sierra chart persistent variables for up and down reclaims
 	Reclaim *upReclaims = (Reclaim *)sc.GetPersistentPointer(1);
 	Reclaim *downReclaims = (Reclaim *)sc.GetPersistentPointer(2);
+	int EVPullbackSize = sc.Input[13].GetInt();
+
+
 
 
 	// get current price
@@ -363,10 +493,30 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 		}
 		else
 		{
+			// update EV
+			if(checkPreviousBar && !upReclaims[i].IncreaseEVOnNextTouch) {
+				int pullbackSizeInTicks = int((CurrentHigh-upReclaims[i].ActiveSidePrice)/sc.TickSize);
+				if(pullbackSizeInTicks>=EVPullbackSize) {
+					upReclaims[i].IncreaseEVOnNextTouch=true;
+				}
+			}
+
+			if(checkPreviousBar && upReclaims[i].IncreaseEVOnNextTouch && CurrentLow<=upReclaims[i].ActiveSidePrice) {
+				upReclaims[i].EV=upReclaims[i].EV+1;
+				upReclaims[i].IncreaseEVOnNextTouch = false;
+			}
+
+			// update ActiveSidePrice
 			if (CurrentLow < upReclaims[i].ActiveSidePrice)
 			{
 				upReclaims[i].ActiveSidePrice = max(CurrentLow, upReclaims[i].FixedSidePrice);
+				upReclaims[i].CurrentHeight = (int)((upReclaims[i].ActiveSidePrice-upReclaims[i].FixedSidePrice)/sc.TickSize);
+				if(upReclaims[i].CurrentHeight<=sc.Input[10].GetInt()) {
+					// reclaim must become hollow, set DecayStartDatetime
+					upReclaims[i].DecayStartTime=sc.CurrentSystemDateTime;
+				}
 			}
+
 
 			if (CurrentLow<=upReclaims[i].FixedSidePrice || upReclaims[i].ActiveSidePrice<=upReclaims[i].FixedSidePrice)
 			{
@@ -380,6 +530,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 
 
 		DrawReclaim(sc, upReclaims[i], false, i);
+		DrawReclaimEVText(sc, upReclaims[i], false, i);
 	}
 
 	// Loop all down reclaims and update them according to CurrentPrice
@@ -417,9 +568,27 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 		}
 		else
 		{
+			// update EV
+			if(checkPreviousBar && !downReclaims[i].IncreaseEVOnNextTouch) {
+				int pullbackSizeInTicks = int((downReclaims[i].ActiveSidePrice-CurrentLow)/sc.TickSize);
+				if(pullbackSizeInTicks>=EVPullbackSize) {
+					downReclaims[i].IncreaseEVOnNextTouch=true;
+				}
+			}
+
+			if(checkPreviousBar && downReclaims[i].IncreaseEVOnNextTouch && CurrentHigh>=downReclaims[i].ActiveSidePrice) {
+				downReclaims[i].EV=downReclaims[i].EV+1;
+				downReclaims[i].IncreaseEVOnNextTouch = false;
+			}
+
 			if (CurrentHigh > downReclaims[i].ActiveSidePrice)
 			{
 				downReclaims[i].ActiveSidePrice = min(CurrentHigh, downReclaims[i].FixedSidePrice);
+				downReclaims[i].CurrentHeight= (int)((downReclaims[i].FixedSidePrice-downReclaims[i].ActiveSidePrice)/sc.TickSize);
+				if(downReclaims[i].CurrentHeight<=sc.Input[10].GetInt()) {
+					// reclaim must become hollow, set DecayStartDatetime
+					downReclaims[i].DecayStartTime=sc.CurrentSystemDateTime;
+				}
 			}
 
 			if (CurrentHigh>=downReclaims[i].FixedSidePrice || downReclaims[i].ActiveSidePrice>=downReclaims[i].FixedSidePrice)
@@ -433,6 +602,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 		}
 
 		DrawReclaim(sc, downReclaims[i], false, i);
+		DrawReclaimEVText(sc, downReclaims[i], false, i);
 	}
 }
 
@@ -462,6 +632,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef MinReclaimSize = sc.Input[10];		// Reclaims smaller than this value will be hollow
 	SCInputRef HollowReclaimsColor = sc.Input[11];		// Color of the hollow reclaims
 	SCInputRef LookForOppositeBarColor = sc.Input[12];		// When true, only start a new reclaim if the candle that pulled back is the opposite color of the one before
+	SCInputRef EVPullbackSize = sc.Input[13];		// Minimum pullback size in tick required to increse EV by 1 the next time active side is touched
 
 
 	// Persistent variables to store the previous price (required to only update reclaims if price has changed)
@@ -523,10 +694,14 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
         MinReclaimSize.SetIntLimits(0, 10000); 
 
 		HollowReclaimsColor.Name = "Hollow reclaims color";
-		HollowReclaimsColor.SetColor(RGB(25, 25, 25)); 
+		HollowReclaimsColor.SetColor(RGB(50, 50, 50)); 
 
 		LookForOppositeBarColor.Name = "Look for opposite bar color when starting a new pullback";
 		LookForOppositeBarColor.SetYesNo(1); 
+
+		EVPullbackSize.Name = "Minimum pullback required in ticks to add 1 EV to reclaim";
+		EVPullbackSize.SetInt(3); 
+        EVPullbackSize.SetIntLimits(0, 10000); 
 
 		return;
 	}
@@ -551,6 +726,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_UpReclaims[i].CurrentHeight= 0;
 				p_UpReclaims[i].MaxHeight = 0;
 				p_UpReclaims[i].MaxRetracement = 0;
+				p_UpReclaims[i].EV = 0;
+				p_UpReclaims[i].IncreaseEVOnNextTouch = false;
 			}
 
 			// initialize values for first reclaim
@@ -566,7 +743,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
+			p_UpReclaims[0].RectLineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
 		}
 
 		if (p_DownReclaims == NULL)
@@ -582,6 +759,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_DownReclaims[i].CurrentHeight = 0;
 				p_DownReclaims[i].MaxHeight = 0;
 				p_DownReclaims[i].MaxRetracement = 0;
+				p_DownReclaims[i].EV = 0;
+				p_DownReclaims[i].IncreaseEVOnNextTouch = false;
 			}
 
 			// initialize values for first reclaim
@@ -597,7 +776,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			}
 
 			// draw first reclaim and store the sierra chart linenumber
-			p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
+			p_DownReclaims[0].RectLineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
 		}
 
 		return;
@@ -642,9 +821,15 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_UpReclaims[0].CurrentHeight = 0;
 		p_UpReclaims[0].MaxRetracement = 0;
 		p_UpReclaims[0].Deleted = false;
+		p_UpReclaims[0].EV = 1;
+		p_UpReclaims[0].IncreaseEVOnNextTouch = false;
+
 
 		// draw the new rectangle and store the sierra LineNumber
-		p_UpReclaims[0].LineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
+		p_UpReclaims[0].RectLineNumber = DrawReclaim(sc, p_UpReclaims[0], true, 0);
+
+		// draw EV text for reclaim that was just shifted right
+		p_UpReclaims[1].EVTextLineNumber = DrawReclaimEVText(sc, p_UpReclaims[1], true, 1);
 	}
 
 	// Check if we need to create a new bearish reclaim
@@ -667,9 +852,14 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_DownReclaims[0].CurrentHeight = 0;
 		p_DownReclaims[0].MaxRetracement = 0;
 		p_DownReclaims[0].Deleted = false;
+		p_DownReclaims[0].EV = 1;
+		p_DownReclaims[0].IncreaseEVOnNextTouch = false;
 
 		// draw the new rectangle and store the sierra LineNumber
-		p_DownReclaims[0].LineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
+		p_DownReclaims[0].RectLineNumber = DrawReclaim(sc, p_DownReclaims[0], true, 0);
+
+		// draw EV text for recaim that was just shifted right
+		p_DownReclaims[1].EVTextLineNumber = DrawReclaimEVText(sc, p_DownReclaims[1], true, 1);
 	}
 
 	// update existing reclaims
