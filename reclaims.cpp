@@ -77,6 +77,22 @@ struct Reclaim
 	bool IncreaseEVOnNextTouch;
 
 	/**
+	 * @brief The swing counter of the reclaim
+	 *
+	 * Every time price touches the active side of the rectangle after a pullback, Swing increases by 1
+	 */
+	int Swing;
+
+	/**
+	 * @brief Wether to incresse the swing counter the next time active side is touched
+	 *
+	 * When price pulls away enough ticks from the active side price, this is set to true.
+	 * The next time price touches the active side of the reclaim, if IncreaseSwingOnNextTouch
+	 * is true then Swing is increased by 1
+	 */
+	bool IncreaseSwingOnNextTouch;
+
+	/**
 	 * @brief The maximum height in ticks that the reclaims got to be during its existance
 	 *
 	 * when the current rectangle height is smaller than MaxHeight by a certain number of ticks, 
@@ -355,7 +371,11 @@ int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool creat
 
 	SCString textString;
 	//textString.Format("EV: %d, increase flag: %d", reclaim.EV, reclaim.IncreaseEVOnNextTouch);
-	textString.Format("%d", reclaim.EV);
+	if(reclaim.Swing <2) {
+		textString.Format("%d", reclaim.EV);
+	} else {
+		textString.Format("%d-%d", reclaim.EV, reclaim.Swing);
+	}
 	TextTool.Text = textString;
 	TextTool.FontSize = sc.Input[20].GetInt();
 
@@ -426,6 +446,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 	Reclaim *upReclaims = (Reclaim *)sc.GetPersistentPointer(1);
 	Reclaim *downReclaims = (Reclaim *)sc.GetPersistentPointer(2);
 	int EVPullbackSize = sc.Input[13].GetInt();
+	int SwingPullbackSize = sc.Input[21].GetInt();
 
 
 
@@ -492,6 +513,21 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 				upReclaims[i].EV=upReclaims[i].EV+1;
 				upReclaims[i].IncreaseEVOnNextTouch = false;
 			}
+
+			// update Swing
+			if(checkPreviousBar && !upReclaims[i].IncreaseSwingOnNextTouch) {
+				int pullbackSizeInTicks = int((CurrentHigh-upReclaims[i].ActiveSidePrice)/sc.TickSize);
+				if(pullbackSizeInTicks>=SwingPullbackSize) {
+					upReclaims[i].IncreaseSwingOnNextTouch=true;
+				}
+			}
+
+			if(checkPreviousBar && upReclaims[i].IncreaseSwingOnNextTouch && CurrentLow<=upReclaims[i].ActiveSidePrice) {
+				upReclaims[i].Swing=upReclaims[i].Swing+1;
+				upReclaims[i].IncreaseSwingOnNextTouch = false;
+			}
+
+
 
 			// update ActiveSidePrice
 			if (CurrentLow < upReclaims[i].ActiveSidePrice)
@@ -573,6 +609,19 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 				downReclaims[i].IncreaseEVOnNextTouch = false;
 			}
 
+			// update Swing counter
+			if(checkPreviousBar && !downReclaims[i].IncreaseSwingOnNextTouch) {
+				int pullbackSizeInTicks = int((downReclaims[i].ActiveSidePrice-CurrentLow)/sc.TickSize);
+				if(pullbackSizeInTicks>=SwingPullbackSize) {
+					downReclaims[i].IncreaseSwingOnNextTouch=true;
+				}
+			}
+
+			if(checkPreviousBar && downReclaims[i].IncreaseSwingOnNextTouch && CurrentHigh>=downReclaims[i].ActiveSidePrice) {
+				downReclaims[i].Swing=downReclaims[i].Swing+1;
+				downReclaims[i].IncreaseSwingOnNextTouch = false;
+			}
+
 			if (CurrentHigh > downReclaims[i].ActiveSidePrice)
 			{
 				downReclaims[i].ActiveSidePrice = min(CurrentHigh, downReclaims[i].FixedSidePrice);
@@ -636,6 +685,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef EVTextThreshold = sc.Input[18];		// If EV is less than this value, don't display the EV text
 	SCInputRef EVTextShift = sc.Input[19];		// If EV is less than this value, don't display the EV text
 	SCInputRef EVTextFontSize = sc.Input[20];		// Font size of EV text
+	SCInputRef SwingPullbackSize = sc.Input[21];		// Minimum pullback size in tick required to increse the swing counter by 1 the next time active side is touched
+
 
 
 	// Persistent variables to store the previous price (required to only update reclaims if price has changed)
@@ -728,6 +779,10 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		EVTextFontSize.Name = "EV text font size";
 		EVTextFontSize.SetInt(10); 
 
+		SwingPullbackSize.Name = "Minimum pullback required in ticks to add 1 to the swing counter of the reclaim";
+		SwingPullbackSize.SetInt(12); 
+        SwingPullbackSize.SetIntLimits(0, 10000); 
+
 		return;
 	}
 
@@ -753,6 +808,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_UpReclaims[i].MaxRetracement = 0;
 				p_UpReclaims[i].EV = 0;
 				p_UpReclaims[i].IncreaseEVOnNextTouch = false;
+				p_UpReclaims[i].Swing = 0;
+				p_UpReclaims[i].IncreaseSwingOnNextTouch = false;
 				p_UpReclaims[i].EVTextLineNumber = -1;
 			}
 
@@ -787,6 +844,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 				p_DownReclaims[i].MaxRetracement = 0;
 				p_DownReclaims[i].EV = 0;
 				p_DownReclaims[i].IncreaseEVOnNextTouch = false;
+				p_DownReclaims[i].Swing = 0;
+				p_DownReclaims[i].IncreaseSwingOnNextTouch = false;
 				p_DownReclaims[i].EVTextLineNumber = -1;
 			}
 
@@ -850,6 +909,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_UpReclaims[0].Deleted = false;
 		p_UpReclaims[0].EV = 1;
 		p_UpReclaims[0].IncreaseEVOnNextTouch = false;
+		p_UpReclaims[0].Swing = 1;
+		p_UpReclaims[0].IncreaseSwingOnNextTouch = false;
 		p_UpReclaims[0].EVTextLineNumber = -1;
 
 
@@ -882,6 +943,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_DownReclaims[0].Deleted = false;
 		p_DownReclaims[0].EV = 1;
 		p_DownReclaims[0].IncreaseEVOnNextTouch = false;
+		p_DownReclaims[0].Swing = 1;
+		p_DownReclaims[0].IncreaseSwingOnNextTouch = false;
 		p_DownReclaims[0].EVTextLineNumber = -1;
 
 		// draw the new rectangle and store the sierra LineNumber
