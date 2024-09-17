@@ -353,7 +353,7 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
  * @return The line number of the newly created text, or `-1` if an existing text was updated.
  */
 int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew = false, int reclaimIndex=0){
-	if(reclaimIndex==0 || reclaim.EV<sc.Input[18].GetInt()) {
+	if(reclaimIndex==0 || (reclaim.EV<sc.Input[18].GetInt() && reclaim.Swing==0)) {
 		return -1;
 	}
 
@@ -371,7 +371,7 @@ int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool creat
 
 	SCString textString;
 	//textString.Format("EV: %d, increase flag: %d", reclaim.EV, reclaim.IncreaseEVOnNextTouch);
-	if(reclaim.Swing <2) {
+	if(reclaim.Swing <1) {
 		textString.Format("%d", reclaim.EV);
 	} else {
 		textString.Format("%d-%d", reclaim.EV, reclaim.Swing);
@@ -394,7 +394,6 @@ int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool creat
 	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt() && reclaim.EV<sc.Input[14].GetInt()) {
 		TextTool.Color = sc.Input[17].GetColor();
 	}
-
 
 	if (!createNew)
 	{
@@ -553,7 +552,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 
 
 		DrawReclaim(sc, upReclaims[i], false, i);
-		if(upReclaims[i].EVTextLineNumber==-1 && upReclaims[i].EV>=sc.Input[18].GetInt()) {
+		if(upReclaims[i].EVTextLineNumber==-1 && (upReclaims[i].EV>=sc.Input[18].GetInt() || upReclaims[i].Swing>0)) {
 			upReclaims[i].EVTextLineNumber = DrawReclaimEVText(sc, upReclaims[i], true, i);
 		} else {
 			DrawReclaimEVText(sc, upReclaims[i], false, i);
@@ -643,7 +642,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 		}
 
 		DrawReclaim(sc, downReclaims[i], false, i);
-		if(downReclaims[i].EVTextLineNumber==-1 && downReclaims[i].EV>=sc.Input[18].GetInt()) {
+		if(downReclaims[i].EVTextLineNumber==-1 && (downReclaims[i].EV>=sc.Input[18].GetInt() || downReclaims[i].Swing>0)) {
 			downReclaims[i].EVTextLineNumber = DrawReclaimEVText(sc, downReclaims[i], true, i);
 		} else {
 			DrawReclaimEVText(sc, downReclaims[i], false, i);
@@ -907,9 +906,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_UpReclaims[0].CurrentHeight = 0;
 		p_UpReclaims[0].MaxRetracement = 0;
 		p_UpReclaims[0].Deleted = false;
-		p_UpReclaims[0].EV = 1;
+		p_UpReclaims[0].EV = 0;
 		p_UpReclaims[0].IncreaseEVOnNextTouch = false;
-		p_UpReclaims[0].Swing = 1;
+		p_UpReclaims[0].Swing = 0;
 		p_UpReclaims[0].IncreaseSwingOnNextTouch = false;
 		p_UpReclaims[0].EVTextLineNumber = -1;
 
@@ -941,9 +940,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		p_DownReclaims[0].CurrentHeight = 0;
 		p_DownReclaims[0].MaxRetracement = 0;
 		p_DownReclaims[0].Deleted = false;
-		p_DownReclaims[0].EV = 1;
+		p_DownReclaims[0].EV = 0;
 		p_DownReclaims[0].IncreaseEVOnNextTouch = false;
-		p_DownReclaims[0].Swing = 1;
+		p_DownReclaims[0].Swing = 0;
 		p_DownReclaims[0].IncreaseSwingOnNextTouch = false;
 		p_DownReclaims[0].EVTextLineNumber = -1;
 
