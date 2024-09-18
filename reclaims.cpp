@@ -492,7 +492,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 				// update fixed side as well
 				upReclaims[i].FixedSidePrice = CurrentLow;
 				upReclaims[i].ActiveSidePrice = CurrentLow;
-				upReclaims[i].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+				upReclaims[i].StartDate = sc.BaseDateTimeIn[sc.Index];
 				upReclaims[i].CurrentHeight = 0;
 				upReclaims[i].MaxHeight = 0;
 				upReclaims[i].MaxRetracement = 0;
@@ -587,7 +587,7 @@ void UpdateReclaims(SCStudyInterfaceRef sc, int size, bool checkPreviousBar=fals
 				// update fixed side as well
 				downReclaims[i].FixedSidePrice = CurrentHigh;
 				downReclaims[i].ActiveSidePrice = CurrentHigh;
-				downReclaims[i].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+				downReclaims[i].StartDate = sc.BaseDateTimeIn[sc.Index];
 				downReclaims[i].CurrentHeight = 0;
 				downReclaims[i].MaxHeight = 0;
 				downReclaims[i].MaxRetracement = 0;
@@ -685,6 +685,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef EVTextShift = sc.Input[19];		// If EV is less than this value, don't display the EV text
 	SCInputRef EVTextFontSize = sc.Input[20];		// Font size of EV text
 	SCInputRef SwingPullbackSize = sc.Input[21];		// Minimum pullback size in tick required to increse the swing counter by 1 the next time active side is touched
+	SCInputRef BarLookback = sc.Input[22];		// Number of bars to look back for creating existing reclaim when the study is loaded
 
 
 
@@ -782,13 +783,27 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		SwingPullbackSize.SetInt(12); 
         SwingPullbackSize.SetIntLimits(0, 10000); 
 
+		BarLookback.Name = "Number of bars to look back when loading study";
+		BarLookback.SetInt(1000); 
+        BarLookback.SetIntLimits(0, 100000); 
+
+
+		sc.AutoLoop = 1;
 		return;
 	}
 
-	// Get the current price
+
+	int startBarIndex = sc.ArraySize - sc.Input[22].GetInt();
+	 if (startBarIndex < 0){
+        startBarIndex = 0;
+	 }
+
+	 if(sc.Index<startBarIndex) {
+		return;
+	 }
 
 	// Initialize stuff on the first run
-	if (sc.Index == 0)
+	if (sc.Index == startBarIndex)
 	{
 		PreviousPrice = sc.LastTradePrice;
 
@@ -815,7 +830,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			// initialize values for first reclaim
 			p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
 			p_UpReclaims[0].ActiveSidePrice = sc.LastTradePrice;
-			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+			p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.Index];
 			p_UpReclaims[0].Deleted = false;
 
 			// store array in the persistent variable
@@ -851,7 +866,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 			// initialize values for first reclaim
 			p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
 			p_DownReclaims[0].ActiveSidePrice = sc.LastTradePrice;
-			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+			p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.Index];
 			p_DownReclaims[0].Deleted = false;
 
 			// store array in the persistent variable
@@ -901,7 +916,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		// first member of the array is now the new reclaim, so update its values
 		p_UpReclaims[0].FixedSidePrice = sc.LastTradePrice;
 		p_UpReclaims[0].ActiveSidePrice = p_UpReclaims[0].FixedSidePrice;
-		p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_UpReclaims[0].StartDate = sc.BaseDateTimeIn[sc.Index];
 		p_UpReclaims[0].MaxHeight = 0;
 		p_UpReclaims[0].CurrentHeight = 0;
 		p_UpReclaims[0].MaxRetracement = 0;
@@ -935,7 +950,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		// first member of the array is now the new reclaim, so update its values
 		p_DownReclaims[0].FixedSidePrice = sc.LastTradePrice;
 		p_DownReclaims[0].ActiveSidePrice = p_DownReclaims[0].FixedSidePrice;
-		p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.ArraySize - 1];
+		p_DownReclaims[0].StartDate = sc.BaseDateTimeIn[sc.Index];
 		p_DownReclaims[0].MaxHeight = 0;
 		p_DownReclaims[0].CurrentHeight = 0;
 		p_DownReclaims[0].MaxRetracement = 0;
