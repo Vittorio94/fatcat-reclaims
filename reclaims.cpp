@@ -289,7 +289,7 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 			RectangleTool.SecondaryColor = sc.Input[3].GetColor();
 			
 			//RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
-			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.EV/10);
+			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.CurrentHeight/sc.Input[14].GetInt());
 		}
 	}
 	else
@@ -305,11 +305,11 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 			RectangleTool.Color = sc.Input[4].GetColor();
 			RectangleTool.SecondaryColor = sc.Input[4].GetColor();
 			//RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
-			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.EV/10);
+			RectangleTool.TransparencyLevel = max(0, sc.Input[8].GetInt()-sc.Input[8].GetInt() * reclaim.CurrentHeight/sc.Input[14].GetInt());
 		}
 	}
 
-	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt() && reclaim.EV<sc.Input[14].GetInt()) {
+	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt()) {
 		SCDateTime timeDelta = sc.CurrentSystemDateTime-reclaim.DecayStartTime;
 		RectangleTool.Color = sc.Input[11].GetColor();
 		double seconds = timeDelta.GetTimeInSeconds();
@@ -391,7 +391,7 @@ int DrawReclaimEVText(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool creat
 		TextTool.Color = sc.Input[16].GetColor();
 	}
 
-	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt() && reclaim.EV<sc.Input[14].GetInt()) {
+	if(reclaimIndex!=0 && reclaim.CurrentHeight<=sc.Input[10].GetInt()) {
 		TextTool.Color = sc.Input[17].GetColor();
 	}
 
@@ -677,7 +677,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef HollowReclaimsColor = sc.Input[11];		// Color of the hollow reclaims
 	SCInputRef LookForOppositeBarColor = sc.Input[12];		// When true, only start a new reclaim if the candle that pulled back is the opposite color of the one before
 	SCInputRef EVPullbackSize = sc.Input[13];		// Minimum pullback size in tick required to increse EV by 1 the next time active side is touched
-	SCInputRef EVThreshold = sc.Input[14];		// If EV of reclaim is larger than this, don't make it hollow
+	SCInputRef MaxBrightnessSize = sc.Input[14];		// Minimum size in ticks of a reclaim for it to be max brightness
 	SCInputRef UpReclaimsTextColor = sc.Input[15];		// Color of the EV text for the bullish reclaims
 	SCInputRef DownReclaimsTextColor = sc.Input[16];		// Color of the EV text for the bearish reclaims
 	SCInputRef HollowReclaimsTextColor = sc.Input[17];		// Color of the EV text for the hollow 
@@ -757,9 +757,9 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		EVPullbackSize.SetInt(3); 
         EVPullbackSize.SetIntLimits(0, 10000); 
 
-		EVThreshold.Name = "Don't make reclaim hollow if EV is bigger than this";
-		EVThreshold.SetInt(4); 
-        EVThreshold.SetIntLimits(0, 10000); 
+		MaxBrightnessSize.Name = "Reclaim size in ticks for max brightness";
+		MaxBrightnessSize.SetInt(16); 
+        MaxBrightnessSize.SetIntLimits(0, 10000); 
 
 		UpReclaimsTextColor.Name = "Text color of bullish reclaims";
 		UpReclaimsTextColor.SetColor(RGB(255, 255, 255)); 
