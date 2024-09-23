@@ -277,14 +277,11 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	// Set the rectangle color
 	if (reclaim.Type == 0)
 	{
-		if(reclaimIndex==0) {
-			// current reclaim
-			//RectangleTool.Color = sc.Input[6].GetColor();
+		if(reclaimIndex==0 && sc.Input[23].GetYesNo()) {
 			RectangleTool.Color = RGB(255,255,255);
 			RectangleTool.SecondaryColor = sc.Input[6].GetColor();
 			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
 		} else {
-			// old reclaim
 			RectangleTool.Color = sc.Input[3].GetColor();
 			RectangleTool.SecondaryColor = sc.Input[3].GetColor();
 			
@@ -294,14 +291,11 @@ int DrawReclaim(SCStudyInterfaceRef sc, const Reclaim &reclaim, bool createNew =
 	}
 	else
 	{
-		if(reclaimIndex==0) {
-			// current reclaim
-			//RectangleTool.Color = sc.Input[7].GetColor();
+		if(reclaimIndex==0 && sc.Input[23].GetYesNo()) {
 			RectangleTool.Color = RGB(255,255,255);
 			RectangleTool.SecondaryColor = sc.Input[7].GetColor();
 			RectangleTool.TransparencyLevel = sc.Input[9].GetInt();
 		} else {
-			// old reclaim
 			RectangleTool.Color = sc.Input[4].GetColor();
 			RectangleTool.SecondaryColor = sc.Input[4].GetColor();
 			//RectangleTool.TransparencyLevel = sc.Input[8].GetInt();
@@ -686,6 +680,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 	SCInputRef EVTextFontSize = sc.Input[20];		// Font size of EV text
 	SCInputRef SwingPullbackSize = sc.Input[21];		// Minimum pullback size in tick required to increse the swing counter by 1 the next time active side is touched
 	SCInputRef BarLookback = sc.Input[22];		// Number of bars to look back for creating existing reclaim when the study is loaded
+	SCInputRef UseCustomColorsForCurrentReclaims = sc.Input[23]; // If true, uses custom colors to draw the active reclaims
 
 
 
@@ -730,10 +725,10 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		UpdateOnBarClose.SetYesNo(0); 
 
 		UpCurrentReclaimColor.Name="Current bullish reclaim color";		
-		UpCurrentReclaimColor.SetColor(RGB(0, 100, 255)); 
+		UpCurrentReclaimColor.SetColor(RGB(0, 179, 0)); 
 
 		DownCurrentReclaimColor.Name="Current bearish reclaim color";		
-		DownCurrentReclaimColor.SetColor(RGB(255, 0, 100)); 
+		DownCurrentReclaimColor.SetColor(RGB(230, 115, 0)); 
 
 		OldReclaimsTransparency.Name="Transparency of existing reclaims"; 
 		OldReclaimsTransparency.SetInt(90); 
@@ -744,7 +739,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
         CurrentReclaimsTransparency.SetIntLimits(0, 100); 
 
 		MinReclaimSize.Name = "Reclaims smaller than this are hollow";
-		MinReclaimSize.SetInt(2); 
+		MinReclaimSize.SetInt(3); 
         MinReclaimSize.SetIntLimits(0, 10000); 
 
 		HollowReclaimsColor.Name = "Hollow reclaims color";
@@ -771,7 +766,7 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		HollowReclaimsTextColor.SetColor(RGB(255, 255, 255)); 
 
 		EVTextThreshold.Name = "Hide text if EV is smaller than (RELOAD REQUIRED)";
-		EVTextThreshold.SetInt(4); 
+		EVTextThreshold.SetInt(3); 
 
 		EVTextShift.Name = "EV text shift";
 		EVTextShift.SetInt(3); 
@@ -787,6 +782,8 @@ SCSFExport scsf_Reclaims(SCStudyInterfaceRef sc)
 		BarLookback.SetInt(1000); 
         BarLookback.SetIntLimits(0, 100000); 
 
+		UseCustomColorsForCurrentReclaims.Name = "Use custom colors for current reclaims";
+		UseCustomColorsForCurrentReclaims.SetYesNo(0); 
 
 		sc.AutoLoop = 1;
 		return;
